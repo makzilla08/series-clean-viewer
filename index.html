@@ -1,0 +1,177 @@
+<!DOCTYPE html><html lang="th"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Series Clean Viewer (Cloud)</title>
+<style>body{font-family:system-ui;background:#111;color:#eee;max-width:900px;margin:auto;padding:16px}
+input{width:70%;padding:10px}button{padding:10px 16px;cursor:pointer}
+video{width:100%;background:#000;margin-top:12px}iframe{width:100%;height:70vh;border:0;background:#000;margin-top:12px}
+.row{display:flex;gap:8px;margin:12px 0}.note{color:#aaa;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin:12px 0}
+.card{background:#222;border-radius:8px;overflow:hidden;cursor:pointer}.card img{width:100%;height:180px;object-fit:cover;background:#333}
+.card div{padding:6px;font-size:12px}
+.eps{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0;max-height:300px;overflow:auto}
+.eps button{padding:8px 12px;min-width:64px}.eps button.cur{background:#0a7;color:#fff}
+h3{margin:16px 0 4px}
+.web{margin:8px 0;font-size:14px}.web a{color:#7cf;display:block;padding:6px 0;border-bottom:1px solid #333;text-decoration:none}
+.nowbar{display:flex;align-items:center;gap:8px;background:#1c2b1c;border:1px solid #0a7;border-radius:8px;padding:8px 12px;margin-top:8px}
+.nowbar b{flex:1}</style></head>
+<body>
+<h2>🎬 Series Clean Viewer <span class="note">cloud edition</span></h2>
+<div class="row">
+<input id="q" placeholder="🔍 ค้นหาชื่อเรื่อง ... (เช่น โลกอันสมบูรณ์แบบ)">
+<button onclick="search()">ค้นหา</button>
+</div>
+<div id="results" class="grid"></div>
+<div id="epsec" style="display:none">
+<h3 id="eptitle"></h3>
+<div class="row">
+<button onclick="toggleOrder()" id="ordbtn">เรียง: เก่า → ใหม่</button>
+<span class="note" id="epcount"></span>
+</div>
+<div id="eps" class="eps"></div>
+</div>
+<div class="row">
+<input id="u" placeholder="หรือวางลิงก์วิดีโอ / YouTube / m3u8 / mp4 ...">
+<button onclick="resolve()">ดูแบบคลีน</button>
+</div>
+<p class="note">เวอร์ชัน static: ขุดลิงก์ผ่าน proxy ในเบราว์เซอร์ ไม่มีเซิร์ฟเวอร์ | YouTube เปิดแบบฝัง | เว็บอื่นดึง m3u8/mp4 ตรง</p>
+<video id="v" controls playsinline></video>
+<iframe id="yt" style="display:none" allowfullscreen allow="autoplay; encrypted-media"></iframe>
+<div class="nowbar" id="nowbar" style="display:none">
+<button id="prevbtn" onclick="stepEp(-1)">◀ ตอนก่อน</button>
+<b id="nowtxt">-</b>
+<button id="nextbtn" onclick="stepEp(1)">ตอนถัดไป ▶</button>
+</div>
+<div class="row" style="align-items:center">
+<button onclick="skipIntro()">⏩ ข้ามเพลงเปิด (<span id="skipval">2:00</span>)</button>
+<input id="skip" type="range" min="0" max="600" step="5" value="120" style="flex:1" oninput="document.getElementById('skipval').textContent=fmtT(this.value)">
+</div>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+<script>
+const PROXY='https://cors.eu.org/';
+const BASE='https://anime-hit.com';
+const u=()=>document.getElementById('u').value.trim();
+async function pGet(url){
+  const r=await fetch(PROXY+url);
+  if(!r.ok)throw new Error('โหลดไม่ได้ '+r.status);
+  return r.text();
+}
+function play(src){
+  document.getElementById('yt').style.display='none';
+  const v=document.getElementById('v');v.style.display='block';
+  if(window._hls){try{window._hls.destroy()}catch(e){}window._hls=null}
+  v.pause();v.removeAttribute('src');v.load();
+  if(src.includes('.m3u8')&&window.Hls&&Hls.isSupported()){
+    const h=new Hls();window._hls=h;h.loadSource(src);h.attachMedia(v);v.play().catch(()=>{});
+  }else{v.src=src;v.play().catch(()=>{});}
+}
+function playYT(id){
+  document.getElementById('v').style.display='none';
+  const f=document.getElementById('yt');f.style.display='block';
+  f.src='https://www.youtube.com/embed/'+id+'?autoplay=1&rel=0';
+}
+function ytId(url){
+  const m=url.match(/[?&]v=([\w-]{6,})/)||url.match(/youtu\.be\/([\w-]{6,})/)||url.match(/\/embed\/([\w-]{6,})/);
+  return m?m[1]:null;
+}
+const BAD=['googlesyndication','doubleclick','sa168','huayhit','vast','preroll'];
+async function resolveUrl(pageUrl){
+  if(/\.(m3u8|mp4)(\?|$)/.test(pageUrl))return{src:pageUrl};
+  const yid=ytId(pageUrl);
+  if(yid&&/youtube|youtu\.be/.test(pageUrl))return{yt:yid};
+  const html=await pGet(pageUrl);
+  const doc=new DOMParser().parseFromString(html,'text/html');
+  const frames=[...doc.querySelectorAll('iframe')].map(f=>f.getAttribute('src')||f.getAttribute('data-src')||'').filter(s=>s.startsWith('http'));
+  for(const emb of frames){
+    if(BAD.some(b=>emb.includes(b)))continue;
+    try{
+      const ehtml=await pGet(emb);
+      const vids=[...(ehtml.matchAll(/https?:\/\/[^"'\\\s]+\.m3u8[^"'\\\s]*/g))].map(m=>m[0]);
+      const mp4s=[...(ehtml.matchAll(/https?:\/\/[^"'\\\s]+\.mp4[^"'\\\s]*/g))].map(m=>m[0]).filter(x=>!BAD.some(b=>x.includes(b)));
+      if(vids.length||mp4s.length)return{src:(vids.concat(mp4s))[0]};
+    }catch(e){}
+  }
+  const vs=[...doc.querySelectorAll('video source, video')].map(v=>v.getAttribute('src')||'').filter(s=>s.startsWith('http'));
+  if(vs.length)return{src:vs[0]};
+  throw new Error('ไม่เจอไฟล์วิดีโอในหน้านี้');
+}
+async function resolve(){
+  try{
+    const j=await resolveUrl(u());
+    if(j.yt){playYT(j.yt);}else{play(j.src);LAST_DIRECT=j.src;
+      document.getElementById('directbox').style.display='flex';
+      document.getElementById('directurl').textContent=j.src.slice(0,70)+'…';}
+    if(!CUR.label||CUR.idx<0&&!EP.length)setNow(u(),-1);
+  }catch(e){alert(e.message)}
+}
+let LAST_DIRECT='';
+function copyDirect(){navigator.clipboard.writeText(LAST_DIRECT).then(()=>alert('ก็อปลิงก์แล้ว'))}
+let EP=[],ASC=true,CUR={label:'',idx:-1},EPTITLE='';
+function setNow(label,idx){
+  CUR={label,idx};
+  document.getElementById('nowbar').style.display='flex';
+  document.getElementById('nowtxt').textContent='▶ กำลังดู: '+label;
+  const has=EP.length>0&&idx>=0;
+  document.getElementById('prevbtn').disabled=!has||idx<=0;
+  document.getElementById('nextbtn').disabled=!has||idx>=EP.length-1;
+}
+function playEp(e,idx){
+  [...document.getElementById('eps').children].forEach(b=>b.classList.toggle('cur',b.textContent==='EP.'+e.ep));
+  document.getElementById('u').value=e.url;
+  setNow((EPTITLE?EPTITLE+' — ':'')+'EP.'+e.ep,idx);
+  resolve();
+}
+function stepEp(d){if(CUR.idx<0||!EP.length)return;const ni=CUR.idx+d;if(ni<0||ni>=EP.length)return;playEp(EP[ni],ni);}
+function toggleOrder(){ASC=!ASC;renderEps();}
+function fmtT(s){s=+s;return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}
+function skipIntro(){const v=document.getElementById('v');const s=+document.getElementById('skip').value;v.currentTime=Math.min(v.currentTime+s,(v.duration||1e9)-2);}
+async function search(){
+  const q=document.getElementById('q').value.trim();if(!q)return;
+  const html=await pGet(BASE+'/?s='+encodeURIComponent(q));
+  const doc=new DOMParser().parseFromString(html,'text/html');
+  const g=document.getElementById('results');g.innerHTML='';const seen=new Set();
+  [...doc.querySelectorAll('article')].forEach(a=>{
+    const link=a.querySelector('a[rel="bookmark"]')||a.querySelector('a[href]');
+    if(!link)return;const url=link.href;
+    if(!url||url.includes('/video/')||seen.has(url))return;seen.add(url);
+    const img=a.querySelector('img');
+    const title=link.getAttribute('title')||link.textContent.trim()||url;
+    const thumb=img?(img.getAttribute('data-src')||img.src):'';
+    const d=document.createElement('div');d.className='card';
+    const im=document.createElement('img');im.loading='lazy';im.src=thumb;
+    const t=document.createElement('div');t.textContent=title;
+    d.appendChild(im);d.appendChild(t);d.onclick=()=>loadEps(url);g.appendChild(d);
+  });
+  if(!g.children.length)g.innerHTML='<p class="note">ไม่เจอเรื่องที่ค้นหา</p>';
+}
+async function loadEps(seriesUrl){
+  const html=await pGet(seriesUrl);
+  const eps={};
+  [...html.matchAll(/href="(https:\/\/(?:hit-anime|anime-hit)\.com\/video\/[^"]+)"/g)].forEach(m=>{
+    const n=m[1].match(/-ep-(\d+)/);if(n&&!eps[+n[1]])eps[+n[1]]=m[1];
+  });
+  const t=html.match(/<title>([^<]+)<\/title>/);
+  EPTITLE=t?t[1].split('|')[0].trim():seriesUrl;
+  EP=Object.keys(eps).map(Number).sort((a,b)=>a-b).map(n=>({ep:n,url:eps[n]}));
+  document.getElementById('epsec').style.display='block';
+  document.getElementById('eptitle').textContent='📺 '+EPTITLE;
+  document.getElementById('epcount').textContent='ทั้งหมด '+EP.length+' ตอน';
+  renderEps();
+  document.getElementById('epsec').scrollIntoView();
+}
+function renderEps(){
+  const list=ASC?EP:[...EP].reverse();
+  document.getElementById('ordbtn').textContent=ASC?'เรียง: เก่า → ใหม่':'เรียง: ใหม่ → เก่า';
+  const box=document.getElementById('eps');box.innerHTML='';
+  list.forEach(e=>{
+    const b=document.createElement('button');b.textContent='EP.'+e.ep;
+    b.onclick=()=>playEp(e,EP.indexOf(e));box.appendChild(b);
+  });
+}
+document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter')search()});
+document.getElementById('u').addEventListener('keydown',e=>{if(e.key==='Enter')resolve()});
+</script>
+<div class="row" id="directbox" style="display:none;align-items:center">
+<span class="note" id="directurl" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+<button onclick="copyDirect()">📋 ก็อปลิงก์</button>
+</div>
+</body></html>
