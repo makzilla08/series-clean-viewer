@@ -47,13 +47,37 @@ h3{margin:16px 0 4px}
 </div>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
 <script>
-const PROXY='https://cors.eu.org/';
+const PROXY='https://script.google.com/macros/s/AKfycbyg1yc4oZ-aLD4o4o_acjwM1CmxtCKGaRgYS1-gxLIHHe0hGVPgs-W7l1XNJUNqZ7L-rA/exec?url=';
 const BASE='https://anime-hit.com';
 const u=()=>document.getElementById('u').value.trim();
 async function pGet(url){
-  const r=await fetch(PROXY+url);
+  const r=await fetch(PROXY+encodeURIComponent(url));
   if(!r.ok)throw new Error('โหลดไม่ได้ '+r.status);
   return r.text();
+}
+function parseSearchResults(html){
+  const results=[];
+  const doc=new DOMParser().parseFromString(html,'text/html');
+  [...doc.querySelectorAll('article')].forEach(a=>{
+    const link=a.querySelector('a[rel="bookmark"]')||a.querySelector('a[href]');
+    if(!link)return;
+    const url=link.href;
+    if(!url||url.includes('/video/'))return;
+    const img=a.querySelector('img');
+    const title=link.getAttribute('title')||link.textContent.trim()||url;
+    const thumb=img?(img.getAttribute('data-src')||img.src):'';
+    results.push({title,url,thumb});
+  });
+  return results;
+}
+function parseEpisodes(html){
+  const eps={};
+  const doc=new DOMParser().parseFromString(html,'text/html');
+  [...doc.querySelectorAll('a[href*="/video/"]')].forEach(a=>{
+    const n=a.href.match(/-ep-(\d+)/i);
+    if(n&&!eps[+n[1]])eps[+n[1]]=a.href;
+  });
+  return eps;
 }
 function play(src){
   document.getElementById('yt').style.display='none';
@@ -127,15 +151,10 @@ function skipIntro(){const v=document.getElementById('v');const s=+document.getE
 async function search(){
   const q=document.getElementById('q').value.trim();if(!q)return;
   const html=await pGet(BASE+'/?s='+encodeURIComponent(q));
-  const doc=new DOMParser().parseFromString(html,'text/html');
+  const items=parseSearchResults(html);
   const g=document.getElementById('results');g.innerHTML='';const seen=new Set();
-  [...doc.querySelectorAll('article')].forEach(a=>{
-    const link=a.querySelector('a[rel="bookmark"]')||a.querySelector('a[href]');
-    if(!link)return;const url=link.href;
+  items.forEach(({title,url,thumb})=>{
     if(!url||url.includes('/video/')||seen.has(url))return;seen.add(url);
-    const img=a.querySelector('img');
-    const title=link.getAttribute('title')||link.textContent.trim()||url;
-    const thumb=img?(img.getAttribute('data-src')||img.src):'';
     const d=document.createElement('div');d.className='card';
     const im=document.createElement('img');im.loading='lazy';im.src=thumb;
     const t=document.createElement('div');t.textContent=title;
@@ -145,10 +164,7 @@ async function search(){
 }
 async function loadEps(seriesUrl){
   const html=await pGet(seriesUrl);
-  const eps={};
-  [...html.matchAll(/href="(https:\/\/(?:hit-anime|anime-hit)\.com\/video\/[^"]+)"/g)].forEach(m=>{
-    const n=m[1].match(/-ep-(\d+)/);if(n&&!eps[+n[1]])eps[+n[1]]=m[1];
-  });
+  const eps=parseEpisodes(html);
   const t=html.match(/<title>([^<]+)<\/title>/);
   EPTITLE=t?t[1].split('|')[0].trim():seriesUrl;
   EP=Object.keys(eps).map(Number).sort((a,b)=>a-b).map(n=>({ep:n,url:eps[n]}));
