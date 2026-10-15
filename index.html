@@ -97,7 +97,7 @@ function parseEpisodes(md,seriesUrl){
 }
 function play(src){
   document.getElementById('yt').style.display='none';
-  const v=document.getElementById('v');v.style.display='block';
+  const v=document.getElementById('v');v.style.display='block';v.scrollIntoView({block:'center'});
   if(window._hls){try{window._hls.destroy()}catch(e){}window._hls=null}
   v.pause();v.removeAttribute('src');v.load();
   if(src.includes('.m3u8')&&window.Hls&&Hls.isSupported()){
@@ -107,7 +107,7 @@ function play(src){
 function playYT(id){
   document.getElementById('v').style.display='none';
   const f=document.getElementById('yt');f.style.display='block';
-  f.src='https://www.youtube.com/embed/'+id+'?autoplay=1&rel=0';
+  f.src='https://www.youtube.com/embed/'+id+'?autoplay=1&rel=0';f.scrollIntoView();
 }
 function ytId(url){
   const m=url.match(/[?&]v=([\w-]{6,})/)||url.match(/youtu\.be\/([\w-]{6,})/)||url.match(/\/embed\/([\w-]{6,})/);
@@ -181,13 +181,15 @@ function fmtT(s){s=+s;return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}
 function skipIntro(){const v=document.getElementById('v');const s=+document.getElementById('skip').value;v.currentTime=Math.min(v.currentTime+s,(v.duration||1e9)-2);}
 async function search(){
   const q=document.getElementById('q').value.trim();if(!q)return;
+  const g0=document.getElementById('results');g0.innerHTML='<p class="note">🔎 กำลังค้นหา...</p>';
   const md=await pGet(BASE+'/?s='+encodeURIComponent(q));
   const items=parseSearchResults(md);
   const g=document.getElementById('results');g.innerHTML='';const seen=new Set();
   items.forEach(({title,url})=>{
     if(!url||url.includes('/video/')||seen.has(url))return;seen.add(url);
     const d=document.createElement('div');d.className='card';
-    const im=document.createElement('img');im.loading='lazy';im.src='';
+    const im=document.createElement('img');im.loading='lazy';im.src=thumb||'';
+    im.onerror=()=>{im.style.display='none';};
     const t=document.createElement('div');t.textContent=title;
     d.appendChild(im);d.appendChild(t);d.onclick=()=>loadEps(url);g.appendChild(d);
   });
