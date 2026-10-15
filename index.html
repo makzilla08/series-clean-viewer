@@ -47,13 +47,22 @@ h3{margin:16px 0 4px}
 </div>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
 <script>
-const PROXY='https://r.jina.ai/http://';
+const PX='https://script.google.com/macros/s/AKfycbyg1yc4oZ-aLD4o4o_acjwM1CmxtCKGaRgYS1-gxLIHHe0hGVPgs-W7l1XNJUNqZ7L-rA/exec?u=';
 const BASE='anime-hit.com';
 const u=()=>document.getElementById('u').value.trim();
-async function pGet(url){
-  const r=await fetch(PROXY+url);
-  if(!r.ok)throw new Error('โหลดไม่ได้ '+r.status);
-  return r.text();
+async function pGet(url,tries){
+  tries=tries||3;let last='?';
+  const chain=[PX,'https://cors.eu.org/'];
+  for(let i=0;i<tries;i++){
+    for(const p of chain){
+      const ctl=new AbortController(),to=setTimeout(()=>ctl.abort(),25000);
+      try{const r=await fetch(p+url,{signal:ctl.signal});clearTimeout(to);
+        if(r.ok)return r.text();last='proxy '+r.status;}
+      catch(e){clearTimeout(to);last=e.message;}
+    }
+    await new Promise(r=>setTimeout(r,2000));
+  }
+  throw new Error('โหลดไม่ได้ ('+last+')');
 }
 function parseSearchResults(md){
   const results=[];
